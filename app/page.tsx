@@ -1,7 +1,9 @@
 'use client';
 import {useEffect,useState} from 'react';
 import {PROVIDERS,Provider,Cfg} from '@/lib/providers';
-import {Lesson,AGENTS,generateLesson,orchestrate} from '@/lib/lesson';
+import {Lesson,Cmd,AGENTS,generateLesson,orchestrate,gradeShort} from '@/lib/lesson';
+import {extractPdf} from '@/lib/pdf';
+import Board from './Board';
 import {exportPptx,toMarkdown,download} from '@/lib/export';
 type Turn={who:string;text:string};
 export default function Home(){
@@ -12,6 +14,7 @@ export default function Home(){
  const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
  const [log,setLog]=useState<Turn[]>([]);const [q,setQ]=useState('');
  const [picked,setPicked]=useState<Record<number,number>>({});
+ const [cmds,setCmds]=useState<Cmd[]>([]);const [sa,setSa]=useState<Record<number,string>>({});const [fb,setFb]=useState<Record<number,{score:number;feedback:string}>>({});
  useEffect(()=>{try{const c=localStorage.getItem('cfg'),l=localStorage.getItem('lesson');
   if(c){setCfg(JSON.parse(c));setTab('lesson')}if(l){const x=JSON.parse(l);setLesson(x);setLog(x.dialogue)}}catch{}},[]);
  const saveCfg=(c:Cfg)=>{setCfg(c);localStorage.setItem('cfg',JSON.stringify(c))};
@@ -21,8 +24,9 @@ export default function Home(){
  const gen=()=>run(async()=>{const l=await generateLesson(cfg,topic,doc);setLesson(l);setLog(l.dialogue);setSlide(0);setPicked({});
   localStorage.setItem('lesson',JSON.stringify(l));setTab('lesson')});
  const ask=()=>run(async()=>{if(!lesson||!q.trim())return;const me={who:'You',text:q};setLog(x=>[...x,me]);setQ('');
-  const t=await orchestrate(cfg,lesson,slide,me.text);setLog(x=>[...x,...t]);t.forEach(speak)});
- const upload=async(f?:File)=>{if(!f)return;if(/pdf$/i.test(f.name)){setErr('PDF parsing (pdf.js) is not included in this build — paste the text or upload TXT/MD.');return}setDoc(await f.text())};
+  const t=await orchestrate(cfg,lesson,slide,me.text);setLog(x=>[...x,...t]);setCmds(c=>[...c,...t.flatMap((u:any)=>Array.isArray(u.draw)?u.draw:[])]);t.forEach(speak)});
+ const sketch=()=>run(async()=>{if(!lesson)return;const t=await orchestrate(cfg,lesson,slide,'Teacher, please sketch a simple labeled diagram for this slide on the whiteboard.');setLog(x=>[...x,...t]);setCmds(c=>[...c,...t.flatMap((u:any)=>Array.isArray(u.draw)?u.draw:[])]);t.forEach(speak)});
+ const upload=(f?:File)=>run(async()=>{if(!f)return;setDoc(/pdf$/i.test(f.name)?await extractPdf(f):await f.text())});
  const mic=()=>{const R=(window as any).SpeechRecognition||(window as any).webkitSpeechRecognition;if(!R)return setErr('Speech recognition is not supported in this browser.');
   const r=new R();r.onresult=(e:any)=>setQ(e.results[0][0].transcript);r.start()};
  const tabs=['settings','lesson','classroom','quiz','project'];
@@ -40,7 +44,7 @@ export default function Home(){
    <input className="inp" type="password" placeholder="API key" value={cfg.key} onChange={e=>saveCfg({...cfg,key:e.target.value})}/>
    <input className="inp" placeholder="Model" value={cfg.model} onChange={e=>saveCfg({...cfg,model:e.target.value})}/>
    <hr/><input className="inp" placeholder="Topic (e.g. How photosynthesis works)" value={topic} onChange={e=>setTopic(e.target.value)}/>
-   <input type="file" accept=".txt,.md" onChange={e=>upload(e.target.files?.[0])} className="text-sm"/>
+   <input type="file" accept=".txt,.md,.pdf" onChange={e=>upload(e.target.files?.[0])} className="text-sm"/>{doc&&<span className="text-xs"> 📄 {doc.length} characters loaded</span>}
    <button className="btn" disabled={busy||(!topic&&!doc)} onClick={gen}>Generate lesson</button></div>}
   {tab!=='settings'&&!lesson&&<div className="card">No lesson yet — create one in Settings.</div>}
   {lesson&&tab==='lesson'&&s&&<div className="card space-y-3"><h2 className="text-xl font-semibold">{lesson.title}</h2>
@@ -58,11 +62,16 @@ export default function Home(){
     <span className="text-2xl">{AGENTS[t.who]?.emoji??'🧑'}</span><div><b>{t.who}</b><div>{t.text}</div></div></div>)}</div>
    <div className="flex gap-2"><input className="inp" placeholder="✋ Raise a hand — ask a question" value={q} onChange={e=>setQ(e.target.value)} onKeyDown={e=>e.key==='Enter'&&ask()}/>
     <button className="btn" onClick={mic}>🎤</button><button className="btn" disabled={busy} onClick={ask}>Ask</button></div>
+   <Board cmds={cmds} onClear={()=>setCmds([])}/><button className="btn" disabled={busy} onClick={sketch}>🖍 Teacher, draw this slide</button>
    <p className="text-xs opacity-70">One orchestrator call per question decides who answers. Click a message to hear it.</p></div>}
   {lesson&&tab==='quiz'&&<div className="space-y-3">{lesson.quiz.map((x,i)=><div key={i} className="card space-y-1"><b>{i+1}. {x.q}</b>
    {x.options.map((o,j)=><button key={j} disabled={picked[i]!==undefined} onClick={()=>setPicked({...picked,[i]:j})}
     className={'block w-full rounded border p-2 text-left text-sm '+(picked[i]!==undefined?(j===x.answer?'bg-green-200 dark:bg-green-900':j===picked[i]?'bg-red-200 dark:bg-red-900':''):'')}>{o}</button>)}
    {picked[i]!==undefined&&<p className="text-sm">💡 {x.explanation}</p>}</div>)}
+   {(lesson.short??[]).map((x,i)=><div key={'s'+i} className="card space-y-2"><b>Short answer: {x.q}</b>
+    <textarea className="inp" rows={2} value={sa[i]??''} onChange={e=>setSa({...sa,[i]:e.target.value})}/>
+    <button className="btn" disabled={busy||!sa[i]} onClick={()=>run(async()=>{const r=await gradeShort(cfg,x.q,x.ideal,sa[i]);setFb({...fb,[i]:r})})}>Check</button>
+    {fb[i]&&<p className="text-sm">{fb[i].score>=0.7?'✅':'🟡'} {fb[i].feedback}</p>}</div>)}
    <div className="card">Score: {lesson.quiz.filter((x,i)=>picked[i]===x.answer).length}/{lesson.quiz.length}</div></div>}
   {lesson&&tab==='project'&&<div className="card space-y-2"><p>{lesson.project.task}</p>
    <ol className="list-decimal pl-5">{lesson.project.steps.map((x,i)=><li key={i}>{x}</li>)}</ol>

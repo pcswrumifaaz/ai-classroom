@@ -12,7 +12,7 @@ export const PROVIDERS:Record<Provider,Adapter>={
   req:(k,m,s,u)=>({url:`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${k}`,headers:{},
    body:{systemInstruction:{parts:[{text:s}]},contents:[{role:'user',parts:[{text:u}]}]}}),
   parse:d=>d.candidates?.[0]?.content?.parts?.map((p:any)=>p.text).join('')??''},
- groq:{name:'Groq (free tier)',model:'model:openai/gpt-oss-120b',link:'https://console.groq.com/keys',
+ groq:{name:'Groq (free tier)',model:'openai/gpt-oss-120b',link:'https://console.groq.com/keys',
   tip:'Create a free account, open API Keys, create one.',req:oai('https://api.groq.com/openai/v1/chat/completions'),parse:oparse},
  openrouter:{name:'OpenRouter (free models)',model:'meta-llama/llama-3.3-70b-instruct:free',link:'https://openrouter.ai/keys',
   tip:'Create a key, use model IDs ending in ":free".',req:oai('https://openrouter.ai/api/v1/chat/completions'),parse:oparse},
@@ -34,7 +34,8 @@ export async function chat(c:Cfg,sys:string,usr:string):Promise<string>{
   try{res=await fetch(r.url,{method:'POST',headers:{'Content-Type':'application/json',...r.headers},body:JSON.stringify(r.body)});}
   catch{throw new Error('Network error — check your connection (or CORS/ad-blocker).');}
   if(res.status===429||res.status===503){if(i===3)throw new Error('Quota/rate limit exceeded. Wait a minute or switch provider.');await sleep(2000*2**i);continue;}
-   if(!res.ok){const t=await res.text().catch(()=>'');throw new Error(`Provider error ${res.status}: ${t.slice(0,300)}`);}
+  if(res.status===401||res.status===403||res.status===400){throw new Error(`Provider rejected the request (${res.status}). Check your key and model name.`);}
+  if(!res.ok)throw new Error('Provider error '+res.status);
   return a.parse(await res.json());
  }
  throw new Error('Failed');
