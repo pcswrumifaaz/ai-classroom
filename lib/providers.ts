@@ -12,7 +12,7 @@ export const PROVIDERS:Record<Provider,Adapter>={
   req:(k,m,s,u)=>({url:`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${k}`,headers:{},
    body:{systemInstruction:{parts:[{text:s}]},contents:[{role:'user',parts:[{text:u}]}]}}),
   parse:d=>d.candidates?.[0]?.content?.parts?.map((p:any)=>p.text).join('')??''},
- groq:{name:'Groq (free tier)',model:'llama-3.3-70b-versatile',link:'https://console.groq.com/keys',
+ groq:{name:'Groq (free tier)',model:'model:openai/gpt-oss-120b',link:'https://console.groq.com/keys',
   tip:'Create a free account, open API Keys, create one.',req:oai('https://api.groq.com/openai/v1/chat/completions'),parse:oparse},
  openrouter:{name:'OpenRouter (free models)',model:'meta-llama/llama-3.3-70b-instruct:free',link:'https://openrouter.ai/keys',
   tip:'Create a key, use model IDs ending in ":free".',req:oai('https://openrouter.ai/api/v1/chat/completions'),parse:oparse},
