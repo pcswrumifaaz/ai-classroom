@@ -20,8 +20,10 @@ JSON shape: {"title":str,"outline":[str],"slides":[{"title":str,"bullets":[str],
 "quiz":[{"q":str,"options":[4 str],"answer":0-3 index,"explanation":str}] (5),
 "project":{"task":str,"steps":[str],"rubric":[str]}}`;
  let err='';
- for(let i=0;i<3;i++){try{const l=parseJSON(await chat(c,sys,usr+err));if(valid(l))return l;err='\nYour last output had the wrong shape. Follow the schema exactly.';}
-  catch(e:any){if(/key|quota|Network|rejected/i.test(e.message))throw e;err='\nYour last output was not valid JSON. Output JSON only.';}}
+  for(let i=0;i<3;i++){
+  const raw=await chat(c,sys,usr+err);
+  try{const l=parseJSON(raw);if(valid(l))return l;err='\nYour last output had the wrong shape. Follow the schema exactly.';}
+  catch{err='\nYour last output was not valid JSON. Output JSON only.';}}
  throw new Error('Model kept returning malformed lessons. Try again or pick a stronger model.');}
 export async function orchestrate(c:Cfg,l:Lesson,slide:number,q:string){
  const sys='You orchestrate a classroom. Reply ONLY with a JSON array of 1-3 turns [{"who":"Teacher|Maya|Leo|Sam","text":str}]. Pick only the agents who should respond; keep each turn under 50 words and in character.';
