@@ -4,19 +4,12 @@ import type {BoardSpec,Cmd} from '@/lib/lesson';
 type P={x:number;y:number};
 const COL:Record<string,string>={w:'#f4f4ee',y:'#ffe066',b:'#8ecae6',p:'#ff9ecf',o:'#ffb347'};
 const W=1000,H=600,PI=Math.PI;
-function fnOf(s:string):((x:number)=>number)|null{
+export function fnOf(s:string):((x:number)=>number)|null{
  const l=s.toLowerCase();if(!/^[0-9x+\-*/^().\s]*$/.test(l.replace(/\b(sin|cos|tan|sqrt|abs|exp|ln|pi)\b/g,'')))return null;
  const e=l.replace(/(\d)\s*x/g,'$1*x').replace(/x\s*\^\s*(\d+(\.\d+)?)/g,'Math.pow(x,$1)').replace(/\^/g,'**')
   .replace(/\bpi\b/g,'Math.PI').replace(/\b(sin|cos|tan|sqrt|abs|exp)\b/g,'Math.$1').replace(/\bln\b/g,'Math.log');
  try{return new Function('x','return '+e) as (x:number)=>number}catch{return null}}
-export default function Board({boards,onClear}:{boards:BoardSpec[];onClear:()=>void}){
- const ref=useRef<HTMLCanvasElement>(null);const strokes=useRef<P[][]>([]);const cur=useRef<P[]|null>(null);
- const [i,setI]=useState(0);const [shown,setShown]=useState(0);const [rp,setRp]=useState(0);
- const b=boards[Math.min(i,boards.length-1)];
- useEffect(()=>{if(boards.length)setI(boards.length-1)},[boards.length]);
- useEffect(()=>{setShown(0);if(!b)return;const t=setInterval(()=>setShown(s=>{if(s>=b.cmds.length){clearInterval(t);return s}return s+1}),650);return()=>clearInterval(t)},[b,rp]);
- useEffect(()=>{document.fonts?.load('600 24px Caveat').then(()=>setRp(r=>r))},[]);
- const draw=()=>{const c=ref.current;if(!c)return;const g=c.getContext('2d')!;
+function paint(g:CanvasRenderingContext2D,b:BoardSpec|undefined,shown:number,us:P[][]){
   const gr=g.createLinearGradient(0,0,W,H);gr.addColorStop(0,'#24473a');gr.addColorStop(1,'#1b352b');g.fillStyle=gr;g.fillRect(0,0,W,H);
   g.strokeStyle='#8a5a2b';g.lineWidth=12;g.strokeRect(0,0,W,H);g.lineCap='round';g.lineJoin='round';
   const X=(v=0)=>v/100*W,Y=(v=0)=>v/100*H;let seed=1;const rnd=()=>{seed=(seed*16807)%2147483647;return seed/2147483647-.5};
@@ -73,7 +66,16 @@ export default function Board({boards,onClear}:{boards:BoardSpec[];onClear:()=>v
   if(!b){txt('Ask the teacher to draw something ✏️',500,300,COL.w,40)}
   else{txt(b.title,500,46,COL.y,48);line({x:300,y:76},{x:700,y:76},COL.y);
    b.cmds.slice(0,shown).forEach(m=>{try{one(m)}catch{}});if(shown>=b.cmds.length)txt('✎ '+b.caption,500,H-34,COL.b,30)}
-  for(const s of [...strokes.current,...(cur.current?[cur.current]:[])]){g.strokeStyle=COL.p;g.lineWidth=3;g.beginPath();s.forEach((p,n)=>n?g.lineTo(p.x,p.y):g.moveTo(p.x,p.y));g.stroke()}};
+  for(const s of us){g.strokeStyle=COL.p;g.lineWidth=3;g.beginPath();s.forEach((p,n)=>n?g.lineTo(p.x,p.y):g.moveTo(p.x,p.y));g.stroke()}}
+export function renderPng(b:BoardSpec):string{const c=document.createElement('canvas');c.width=W;c.height=H;paint(c.getContext('2d')!,b,b.cmds.length,[]);return c.toDataURL('image/png').split(',')[1]}
+export default function Board({boards,onClear}:{boards:BoardSpec[];onClear:()=>void}){
+ const ref=useRef<HTMLCanvasElement>(null);const strokes=useRef<P[][]>([]);const cur=useRef<P[]|null>(null);
+ const [i,setI]=useState(0);const [shown,setShown]=useState(0);const [rp,setRp]=useState(0);
+ const b=boards[Math.min(i,boards.length-1)];
+ useEffect(()=>{if(boards.length)setI(boards.length-1)},[boards.length]);
+ useEffect(()=>{setShown(0);if(!b)return;const t=setInterval(()=>setShown(s=>{if(s>=b.cmds.length){clearInterval(t);return s}return s+1}),650);return()=>clearInterval(t)},[b,rp]);
+ useEffect(()=>{document.fonts?.load('600 24px Caveat').then(()=>setRp(r=>r))},[]);
+ const draw=()=>{const c=ref.current;if(!c)return;paint(c.getContext('2d')!,b,shown,[...strokes.current,...(cur.current?[cur.current]:[])])};
  useEffect(draw);
  const pt=(e:React.PointerEvent):P=>{const c=ref.current!,r=c.getBoundingClientRect();return {x:(e.clientX-r.left)*c.width/r.width,y:(e.clientY-r.top)*c.height/r.height}};
  return <div className="space-y-1"><canvas ref={ref} width={W} height={H} className="w-full touch-none rounded-lg"
@@ -85,4 +87,4 @@ export default function Board({boards,onClear}:{boards:BoardSpec[];onClear:()=>v
    <button className="btn" onClick={()=>setRp(r=>r+1)}>⟲ Replay</button>
    <button className="btn" onClick={()=>setShown(b?.cmds.length||0)}>⏭ Show all</button>
    <button className="btn" onClick={()=>{strokes.current=[];onClear()}}>Clear</button>
-   <span className="text-xs opacity-70">Pink chalk = your drawing.</span></div></div>}
+   <span className="text-xs opacity-70">Pink chalk = your drawing.</span>{b?.note&&<span className="text-xs text-green-600 dark:text-green-400">✔ Self-check{b.score!==undefined?` ${b.score}/10`:''} — {b.note}</span>}</div></div>}

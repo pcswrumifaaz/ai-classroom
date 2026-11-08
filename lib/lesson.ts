@@ -1,9 +1,11 @@
-import {chat,Cfg} from './providers';
+import {chat,Cfg,PROVIDERS} from './providers';
+import {checkBoard} from './check';
+import {renderPng} from '@/app/Board';
 export type Lesson={title:string;outline:string[];slides:{title:string;bullets:string[];script:string}[];
  dialogue:{who:string;text:string}[];quiz:{q:string;options:string[];answer:number;explanation:string}[];
  project:{task:string;steps:string[];rubric:string[]};short?:{q:string;ideal:string}[]};
 export type Cmd={t:string;c?:string;x?:number;y?:number;x2?:number;y2?:number;w?:number;h?:number;r?:number;d?:number;n?:number;size?:number;text?:string;dash?:boolean;curve?:number;aromatic?:boolean;fn?:string;xr?:[number,number];yr?:[number,number];pts?:number[][];marks?:number[];asym?:number[];atoms?:string[];bonds?:number[];a1?:number;a2?:number;num?:string;den?:string};
-export type BoardSpec={title:string;caption:string;cmds:Cmd[]};
+export type BoardSpec={title:string;caption:string;cmds:Cmd[];score?:number;note?:string};
 export const AGENTS:Record<string,{emoji:string;persona:string;v:number;pitch:number;rate:number}>={
  Teacher:{emoji:'👩‍🏫',persona:'Ms. Rivera, warm, clear teacher',v:0,pitch:1,rate:1},
  Maya:{emoji:'🙋‍♀️',persona:'Maya, curious classmate who asks "why?"',v:1,pitch:1.4,rate:1.1},
@@ -55,3 +57,30 @@ export async function makeBoard(c:Cfg,l:Lesson,slide:number,req:string):Promise<
  const usr=`Lesson: ${l.title}. Slide: ${l.slides[slide]?.title}.\nDraw a board for: ${req}`;
  for(let i=0;i<3;i++){try{const b=cleanBoard(parseJSON(await chat(c,sys,usr)));if(b)return b}catch(e:any){if(/key|quota|Network|rejected|Provider error/i.test(e.message))throw e}}
  throw new Error('The model did not return a usable drawing. Try again, or pick a stronger model in Settings.');}
+
+type Iss={problem:string;fix:string;accuracy?:boolean};
+const boardSys=()=>'You are a blackboard artist. Reply ONLY with JSON {"title":str,"caption":str,"cmds":[...]}. cmds MUST be a non-empty array and every command MUST have a "t" key.'+BOARD_SPEC+'\nExample 1: '+EX1+'\nExample 2: '+EX2;
+async function critique(c:Cfg,b:BoardSpec,req:string,see:boolean){
+ try{const sys='You are a strict teacher checking a chalkboard drawing. Reply ONLY with JSON {"score":0-10,"issues":[{"problem":str,"fix":str,"accuracy":bool}]} (max 5 issues). Check (1) Accuracy: anything scientifically, mathematically or structurally wrong? (2) Completeness: is everything important labeled and does the caption state the takeaway? (3) Clarity: overlap, clutter, tiny text, confusing order? Be harsh: give 8+ only if it is correct and clean.';
+  const out=await chat(c,sys,`Topic: ${req}. Board title: ${b.title}. Caption: ${b.caption}.`+(see?' The attached image is the rendered board.':'\nBoard commands (100x100 grid, y down): '+JSON.stringify(b.cmds)),see?renderPng(b):undefined);
+  const r=parseJSON(out);return {score:Number(r.score)||0,issues:(Array.isArray(r.issues)?r.issues:[]).map((i:any):Iss=>({problem:String(i.problem||''),fix:String(i.fix||''),accuracy:!!i.accuracy}))};
+ }catch{return null}}
+async function reviseBoard(c:Cfg,req:string,b:BoardSpec,issues:Iss[]):Promise<BoardSpec>{
+ const usr=`Topic: ${req}\nPrevious board: ${JSON.stringify({title:b.title,caption:b.caption,cmds:b.cmds})}\nProblems found:\n- ${issues.map(i=>i.problem+' → '+i.fix).join('\n- ')}\nReturn the full corrected board JSON. If unsure about a detail, draw the simpler correct version.`;
+ for(let i=0;i<2;i++){try{const n=cleanBoard(parseJSON(await chat(c,boardSys(),usr)));if(n)return n}catch{}}
+ return b;}
+// generate -> check -> fix -> show. At most 4 model calls: draw, critique, revise, critique.
+export async function buildBoard(c:Cfg,l:Lesson,slide:number,req:string,st:(s:string)=>void):Promise<BoardSpec>{
+ st('Drawing…');let b=await makeBoard(c,l,slide,req);
+ const see=PROVIDERS[c.provider].vision;let fixed=0,score:number|undefined,note='';
+ for(let r=0;r<2;r++){
+  const ck=checkBoard(b);b=ck.board;fixed+=ck.fixed;st('Checking…');
+  const cr=await critique(c,b,req,see);
+  if(!cr){note=' · could not fully verify';break}
+  score=cr.score;
+  if(!(cr.score<8||cr.issues.some(i=>i.accuracy)||ck.issues.length))break;
+  if(r===1){note=' · some issues may remain';break}
+  st('Fixing…');b=await reviseBoard(c,req,b,[...ck.issues.map(p=>({problem:p,fix:'fix it'})),...cr.issues]);
+ }
+ const fin=checkBoard(b);fixed+=fin.fixed;
+ return {...fin.board,score,note:`checked accuracy, labels and layout${see?'':' (text-only check: this model cannot see images)'}${fixed?` · auto-fixed ${fixed} layout issue(s)`:''}${note}`};}

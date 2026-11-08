@@ -1,7 +1,7 @@
 'use client';
 import {useEffect,useState} from 'react';
 import {PROVIDERS,Provider,Cfg} from '@/lib/providers';
-import {Lesson,BoardSpec,AGENTS,generateLesson,orchestrate,gradeShort,makeBoard} from '@/lib/lesson';
+import {Lesson,BoardSpec,AGENTS,generateLesson,orchestrate,gradeShort,buildBoard} from '@/lib/lesson';
 import {extractPdf} from '@/lib/pdf';
 import Board from './Board';
 import {exportPptx,toMarkdown,download} from '@/lib/export';
@@ -11,7 +11,7 @@ export default function Home(){
  const [lesson,setLesson]=useState<Lesson|null>(null);
  const [tab,setTab]=useState('settings');const [slide,setSlide]=useState(0);
  const [topic,setTopic]=useState('');const [doc,setDoc]=useState('');
- const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
+ const [busy,setBusy]=useState(false);const [err,setErr]=useState('');const [status,setStatus]=useState('');
  const [log,setLog]=useState<Turn[]>([]);const [q,setQ]=useState('');
  const [picked,setPicked]=useState<Record<number,number>>({});
  const [cmds,setCmds]=useState<BoardSpec[]>([]);const [sa,setSa]=useState<Record<number,string>>({});const [fb,setFb]=useState<Record<number,{score:number;feedback:string}>>({});
@@ -20,14 +20,13 @@ export default function Home(){
  const saveCfg=(c:Cfg)=>{setCfg(c);localStorage.setItem('cfg',JSON.stringify(c))};
  const speak=(t:Turn)=>{if(!('speechSynthesis' in window))return;const a=AGENTS[t.who],v=speechSynthesis.getVoices();
   const u=new SpeechSynthesisUtterance(t.text);if(v.length)u.voice=v[a.v%v.length];u.pitch=a.pitch;u.rate=a.rate;speechSynthesis.speak(u)};
- const run=async(f:()=>Promise<void>)=>{setBusy(true);setErr('');try{await f()}catch(e:any){setErr(e.message)}setBusy(false)};
+ const run=async(f:()=>Promise<void>)=>{setBusy(true);setErr('');setStatus('');try{await f()}catch(e:any){setErr(e.message)}setBusy(false)};
  const gen=()=>run(async()=>{const l=await generateLesson(cfg,topic,doc);setLesson(l);setLog(l.dialogue);setSlide(0);setPicked({});
   localStorage.setItem('lesson',JSON.stringify(l));setTab('lesson')});
  const ask=()=>run(async()=>{if(!lesson||!q.trim())return;const me={who:'You',text:q};setLog(x=>[...x,me]);setQ('');
-  const t=await orchestrate(cfg,lesson,slide,me.text);let bs:BoardSpec[]=t.flatMap((u:any)=>u.board?[u.board]:[]);
-  if(!bs.length&&/draw|show|graph|plot|diagram|structure|bond|visual|picture|sketch|board|illustrate|chart|shape|model/i.test(me.text))bs=[await makeBoard(cfg,lesson,slide,me.text)];
+  const t=await orchestrate(cfg,lesson,slide,me.text);const bs:BoardSpec[]=[];if(t.some((u:any)=>u.board)||/draw|show|graph|plot|diagram|structure|bond|visual|picture|sketch|board|illustrate|chart|shape|model/i.test(me.text))bs.push(await buildBoard(cfg,lesson,slide,me.text,setStatus));
   setLog(x=>[...x,...t]);setCmds(c=>[...c,...bs]);t.forEach(speak)});
- const sketch=()=>run(async()=>{if(!lesson)return;const b=await makeBoard(cfg,lesson,slide,'the current slide: '+lesson.slides[slide].title+' — '+lesson.slides[slide].bullets.join('; '));setCmds(c=>[...c,b])});
+ const sketch=()=>run(async()=>{if(!lesson)return;const b=await buildBoard(cfg,lesson,slide,'the current slide: '+lesson.slides[slide].title+' — '+lesson.slides[slide].bullets.join('; '),setStatus);setCmds(c=>[...c,b])});
  const upload=(f?:File)=>run(async()=>{if(!f)return;setDoc(/pdf$/i.test(f.name)?await extractPdf(f):await f.text())});
  const mic=()=>{const R=(window as any).SpeechRecognition||(window as any).webkitSpeechRecognition;if(!R)return setErr('Speech recognition is not supported in this browser.');
   const r=new R();r.onresult=(e:any)=>setQ(e.results[0][0].transcript);r.start()};
@@ -37,7 +36,7 @@ export default function Home(){
   <h1 className="text-2xl font-bold">🎓 AI Classroom</h1>
   <nav className="flex flex-wrap gap-2">{tabs.map(t=><button key={t} onClick={()=>setTab(t)} className={'rounded-lg px-3 py-1 text-sm '+(tab===t?'bg-indigo-600 text-white':'card !p-1 !px-3')}>{t}</button>)}</nav>
   {err&&<div className="rounded-lg bg-red-100 p-3 text-sm text-red-800">{err}</div>}
-  {busy&&<div className="animate-pulse text-sm">Working… (retries automatically on rate limits)</div>}
+  {busy&&<div className="animate-pulse text-sm">{status||'Working…'} (retries automatically on rate limits)</div>}
   {tab==='settings'&&<div className="card space-y-3">
    <p className="text-sm">⏱ 1-minute setup: pick Gemini, open the link, create a free key, paste it below. Keys stay in your browser and go only to the provider.</p>
    <select className="inp" value={cfg.provider} onChange={e=>{const k=e.target.value as Provider;saveCfg({...cfg,provider:k,model:PROVIDERS[k].model})}}>
