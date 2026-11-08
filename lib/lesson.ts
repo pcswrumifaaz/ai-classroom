@@ -1,7 +1,8 @@
-import {chat,Cfg,PROVIDERS} from './providers';
+import {chat,chatMeta,Cfg,PROVIDERS} from './providers';
+import {parseLoose} from './json';
 import {checkBoard} from './check';
 import {renderPng} from '@/app/Board';
-export type Lesson={title:string;outline:string[];slides:{title:string;bullets:string[];script:string}[];
+export type Lesson={title:string;outline:string[];objectives?:string[];vocab?:{term:string;def:string}[];slides:{title:string;bullets:string[];script:string}[];
  dialogue:{who:string;text:string}[];quiz:{q:string;options:string[];answer:number;explanation:string}[];
  project:{task:string;steps:string[];rubric:string[]};short?:{q:string;ideal:string}[]};
 export type Cmd={t:string;c?:string;x?:number;y?:number;x2?:number;y2?:number;w?:number;h?:number;r?:number;d?:number;n?:number;size?:number;text?:string;dash?:boolean;curve?:number;aromatic?:boolean;fn?:string;xr?:[number,number];yr?:[number,number];pts?:number[][];marks?:number[];asym?:number[];atoms?:string[];bonds?:number[];a1?:number;a2?:number;num?:string;den?:string};
@@ -11,23 +12,7 @@ export const AGENTS:Record<string,{emoji:string;persona:string;v:number;pitch:nu
  Maya:{emoji:'🙋‍♀️',persona:'Maya, curious classmate who asks "why?"',v:1,pitch:1.4,rate:1.1},
  Leo:{emoji:'🤨',persona:'Leo, skeptical classmate who challenges claims',v:2,pitch:0.7,rate:0.95},
  Sam:{emoji:'😅',persona:'Sam, quiet classmate who struggles and needs simple explanations',v:3,pitch:1.1,rate:0.9}};
-export function parseJSON(t:string){const s=t.replace(/```json|```/g,'');const a=s.search(/[\[{]/);
- const e=Math.max(s.lastIndexOf('}'),s.lastIndexOf(']'));return JSON.parse(s.slice(a,e+1));}
-function valid(l:any):l is Lesson{return l&&typeof l.title==='string'&&Array.isArray(l.slides)&&l.slides.length>0&&
- l.slides.every((s:any)=>s.title&&Array.isArray(s.bullets)&&typeof s.script==='string')&&Array.isArray(l.dialogue)&&
- Array.isArray(l.quiz)&&l.quiz.every((q:any)=>Array.isArray(q.options)&&Number.isInteger(q.answer))&&l.project&&Array.isArray(l.project.steps);}
-export async function generateLesson(c:Cfg,topic:string,doc:string):Promise<Lesson>{
- const sys='You are a lesson designer. Reply with ONLY valid JSON, no prose or markdown.';
- const usr=`Create a lesson on: ${topic||'the attached document'}.\n${doc?'Source material:\n'+doc.slice(0,24000):''}
-JSON shape: {"title":str,"outline":[str],"slides":[{"title":str,"bullets":[str],"script":str}] (5-7 slides),
-"dialogue":[{"who":"Teacher|Maya|Leo|Sam","text":str}] (8-10 turns),
-"quiz":[{"q":str,"options":[4 str],"answer":0-3 index,"explanation":str}] (5),
-"short":[{"q":str,"ideal":str}] (2 short-answer questions with a model answer),
-"project":{"task":str,"steps":[str],"rubric":[str]}}`;
- let err='';
- for(let i=0;i<3;i++){try{const l=parseJSON(await chat(c,sys,usr+err));if(valid(l))return l;err='\nYour last output had the wrong shape. Follow the schema exactly.';}
-  catch(e:any){if(/key|quota|Network|rejected/i.test(e.message))throw e;err='\nYour last output was not valid JSON. Output JSON only.';}}
- throw new Error('Model kept returning malformed lessons. Try again or pick a stronger model.');}
+export const parseJSON=parseLoose as (t:string)=>any;
 export async function orchestrate(c:Cfg,l:Lesson,slide:number,q:string){
  const sys='You orchestrate a classroom. Reply ONLY with a JSON array of 1-3 turns [{"who":"Teacher|Maya|Leo|Sam","text":str}]. Pick only the agents who should respond; keep each turn under 50 words and in character.'+BOARD_SPEC+'';
  const usr=`Agents: ${Object.values(AGENTS).map(a=>a.persona).join('; ')}.\nLesson: ${l.title}. Current slide: ${l.slides[slide].title} — ${l.slides[slide].bullets.join('; ')}.\nStudent says: ${q}`;
@@ -84,3 +69,81 @@ export async function buildBoard(c:Cfg,l:Lesson,slide:number,req:string,st:(s:st
  }
  const fin=checkBoard(b);fixed+=fin.fixed;
  return {...fin.board,score,note:`checked accuracy, labels and layout${see?'':' (text-only check: this model cannot see images)'}${fixed?` · auto-fixed ${fixed} layout issue(s)`:''}${note}`};}
+
+// ---------- Staged lesson generation (small calls, tolerant parsing, retry only what failed) ----------
+export type Stage='outline'|'slides'|'dialogue'|'quiz'|'project';
+export type Progress=Partial<Record<Stage,'run'|'ok'|'fail'>>;
+export class StageError extends Error{
+ constructor(public stage:Stage,public finish:string,public raw:string,public partial:Partial<Lesson>,msg:string){super(msg)}}
+const txt=(v:any):string=>typeof v==='string'?v:v==null?'':typeof v==='object'?Object.values(v).filter(x=>typeof x==='string').join(' — '):String(v);
+const strs=(v:any):string[]=>(Array.isArray(v)?v:v?[v]:[]).map(txt).filter(Boolean);
+const arr=(v:any):any[]=>Array.isArray(v)?v:[];
+function ansIndex(a:any,opts:string[]):number{
+ if(typeof a==='number')return a;
+ const s=txt(a).trim();
+ if(/^[a-d]$/i.test(s))return s.toUpperCase().charCodeAt(0)-65;
+ if(/^\d+$/.test(s))return Number(s);
+ return opts.findIndex(o=>o.trim().toLowerCase()===s.toLowerCase());}
+const nOutline=(r:any)=>{
+ const title=txt(r?.title),outline=strs(r?.outline);
+ if(!title||!outline.length)return null;
+ return {title,outline,objectives:strs(r.objectives),
+  vocab:arr(r.vocab).map(v=>({term:txt(v?.term),def:txt(v?.def??v?.definition)})).filter(v=>v.term&&v.def)};};
+const nSlides=(r:any)=>{
+ const s=arr(r?.slides??r).map(x=>({title:txt(x?.title),bullets:strs(x?.bullets),script:txt(x?.script)})).filter(x=>x.title&&x.bullets.length);
+ return s.length?s:null;};
+const nDialogue=(r:any)=>{
+ const d=arr(r?.dialogue??r).map(x=>{
+  const w=txt(x?.who).trim().toLowerCase();
+  return {who:Object.keys(AGENTS).find(k=>k.toLowerCase()===w)||'',text:txt(x?.text)};}).filter(x=>x.who&&x.text);
+ return d.length?d:null;};
+const nQuiz=(r:any)=>{
+ const quiz=arr(r?.quiz??r).map(x=>{
+  const options=strs(x?.options??x?.choices);
+  return {q:txt(x?.q??x?.question),options,answer:ansIndex(x?.answer??x?.correct,options),explanation:txt(x?.explanation)};
+ }).filter(x=>x.q&&x.options.length>=2&&x.answer>=0&&x.answer<x.options.length);
+ const short=arr(r?.short).map(x=>({q:txt(x?.q??x?.question),ideal:txt(x?.ideal??x?.answer)})).filter(x=>x.q&&x.ideal);
+ return quiz.length?{quiz,short}:null;};
+const nProject=(r:any)=>{
+ const p=r?.project??r,task=txt(p?.task),steps=strs(p?.steps);
+ return task&&steps.length?{task,steps,rubric:strs(p?.rubric)}:null;};
+async function stage<T>(c:Cfg,name:Stage,sys:string,usr:string,norm:(r:any)=>T|null):Promise<T>{
+ let extra='',finish='',raw='';
+ for(let i=0;i<3;i++){
+  const r=await chatMeta(c,sys,usr+extra);finish=r.finish;raw=r.text;
+  try{
+   const v=norm(parseLoose(raw));
+   if(v)return v;
+   extra='\nYour last answer had the wrong shape. Follow the schema exactly.';
+  }catch{
+   extra=finish==='MAX_TOKENS'?'\nYour last answer was cut off. Be much shorter: fewer items, fewer words.':'\nYour last answer was not valid JSON. Output JSON only.';
+  }}
+ const why=finish==='MAX_TOKENS'?'the output was too long and got cut off':'the model returned unusable output';
+ throw new StageError(name,finish,raw.slice(0,500),{},`Stage "${name}" failed: ${why}. Open "Show details" and use "Retry this stage".`);}
+const LSYS='You write lessons for students. Reply with ONLY valid JSON, no markdown, no commentary. Keep wording concise.';
+export async function generateLesson(c:Cfg,topic:string,doc:string,onProgress:(p:Progress)=>void=()=>{},partial:Partial<Lesson>={}):Promise<Lesson>{
+ const out:Partial<Lesson>={...partial};
+ const prog:Progress={};
+ const mark=(s:Stage,v:'run'|'ok'|'fail')=>{prog[s]=v;onProgress({...prog})};
+ const subject=topic||'the attached document';
+ const src=(n:number)=>doc?`\nSource material:\n${doc.slice(0,n)}`:'';
+ const run=async<T>(s:Stage,usr:string,norm:(r:any)=>T|null,apply:(v:T)=>void)=>{
+  mark(s,'run');
+  try{apply(await stage(c,s,LSYS,usr,norm));mark(s,'ok')}catch(e){mark(s,'fail');throw e}};
+ if(out.outline)mark('outline','ok');
+ else{
+  try{
+   await run('outline',`Plan a lesson on: ${subject}.${src(12000)}\nJSON: {"title":str,"outline":[5-7 str],"objectives":[3-4 str starting "You can..."],"vocab":[{"term":str,"def":str}] (4-6)}`,nOutline,v=>Object.assign(out,v));
+  }catch(e){if(e instanceof StageError)e.partial=out;throw e}
+ }
+ const ctx=`Lesson: ${out.title}\nOutline: ${out.outline!.join(' | ')}\nObjectives: ${(out.objectives||[]).join(' | ')}${src(6000)}`;
+ const tasks:(()=>Promise<void>)[]=[];
+ if(out.slides)mark('slides','ok');else tasks.push(()=>run('slides',`${ctx}\nWrite 5-7 slides, one per outline item. JSON: {"slides":[{"title":str,"bullets":[3-4 short str],"script":str (natural spoken text, max 80 words)}]}`,nSlides,v=>{out.slides=v}));
+ if(out.dialogue)mark('dialogue','ok');else tasks.push(()=>run('dialogue',`${ctx}\nWrite a classroom conversation of 8 turns between Teacher, Maya (curious), Leo (skeptical) and Sam (quiet, struggling), max 30 words each. JSON: {"dialogue":[{"who":"Teacher|Maya|Leo|Sam","text":str}]}`,nDialogue,v=>{out.dialogue=v}));
+ if(out.quiz)mark('quiz','ok');else tasks.push(()=>run('quiz',`${ctx}\nWrite 5 multiple-choice questions and 2 short-answer questions. JSON: {"quiz":[{"q":str,"options":[4 str],"answer":0-3 (index of the correct option),"explanation":str}],"short":[{"q":str,"ideal":str}]}`,nQuiz,v=>{out.quiz=v.quiz;out.short=v.short}));
+ if(out.project)mark('project','ok');else tasks.push(()=>run('project',`${ctx}\nDesign a hands-on project. JSON: {"project":{"task":str,"steps":[4-6 str],"rubric":[3-4 str]}}`,nProject,v=>{out.project=v}));
+ const errors:unknown[]=[];let next=0;
+ const worker=async()=>{while(next<tasks.length){const t=tasks[next++];try{await t()}catch(e){errors.push(e)}}};
+ await Promise.all([worker(),worker()]);
+ if(errors.length){const e=errors[0];if(e instanceof StageError)e.partial=out;throw e}
+ return {title:out.title!,outline:out.outline!,objectives:out.objectives,vocab:out.vocab,slides:out.slides!,dialogue:out.dialogue!,quiz:out.quiz!,short:out.short,project:out.project!};}
