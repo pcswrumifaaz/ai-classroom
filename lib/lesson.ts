@@ -45,10 +45,10 @@ export async function makeBoard(c:Cfg,l:Lesson,slide:number,req:string):Promise<
 
 type Iss={problem:string;fix:string;accuracy?:boolean};
 const boardSys=()=>'You are a blackboard artist. Reply ONLY with JSON {"title":str,"caption":str,"cmds":[...]}. cmds MUST be a non-empty array and every command MUST have a "t" key.'+BOARD_SPEC+'\nExample 1: '+EX1+'\nExample 2: '+EX2;
-async function critique(c:Cfg,b:BoardSpec,req:string,see:boolean){
+async function critique(c:Cfg,b:BoardSpec,req:string,see:boolean):Promise<{score:number;issues:Iss[]}|null>{
  try{const sys='You are a strict teacher checking a chalkboard drawing. Reply ONLY with JSON {"score":0-10,"issues":[{"problem":str,"fix":str,"accuracy":bool}]} (max 5 issues). Check (1) Accuracy: anything scientifically, mathematically or structurally wrong? (2) Completeness: is everything important labeled and does the caption state the takeaway? (3) Clarity: overlap, clutter, tiny text, confusing order? Be harsh: give 8+ only if it is correct and clean.';
   const out=await chat(c,sys,`Topic: ${req}. Board title: ${b.title}. Caption: ${b.caption}.`+(see?' The attached image is the rendered board.':'\nBoard commands (100x100 grid, y down): '+JSON.stringify(b.cmds)),see?renderPng(b):undefined);
-  const r=parseJSON(out);return {score:Number(r.score)||0,issues:(Array.isArray(r.issues)?r.issues:[]).map((i:any):Iss=>({problem:String(i.problem||''),fix:String(i.fix||''),accuracy:!!i.accuracy}))};
+  const r=parseJSON(out);return {score:Number(r.score)||0,issues:(Array.isArray(r.issues)?(r.issues as any[]):([] as any[])).map((i:any):Iss=>({problem:String(i.problem||''),fix:String(i.fix||''),accuracy:!!i.accuracy}))};
  }catch{return null}}
 async function reviseBoard(c:Cfg,req:string,b:BoardSpec,issues:Iss[]):Promise<BoardSpec>{
  const usr=`Topic: ${req}\nPrevious board: ${JSON.stringify({title:b.title,caption:b.caption,cmds:b.cmds})}\nProblems found:\n- ${issues.map(i=>i.problem+' → '+i.fix).join('\n- ')}\nReturn the full corrected board JSON. If unsure about a detail, draw the simpler correct version.`;
@@ -63,7 +63,7 @@ export async function buildBoard(c:Cfg,l:Lesson,slide:number,req:string,st:(s:st
   const cr=await critique(c,b,req,see);
   if(!cr){note=' · could not fully verify';break}
   score=cr.score;
-  if(!(cr.score<8||cr.issues.some(i=>i.accuracy)||ck.issues.length))break;
+  if(!(cr.score<8||cr.issues.some((i:Iss)=>!!i.accuracy)||ck.issues.length))break;
   if(r===1){note=' · some issues may remain';break}
   st('Fixing…');b=await reviseBoard(c,req,b,[...ck.issues.map(p=>({problem:p,fix:'fix it'})),...cr.issues]);
  }
