@@ -7,10 +7,10 @@ const oai=(url:string,vis=false)=>(k:string,m:string,sys:string,usr:string,img?:
 const oparse=(d:any)=>d.choices?.[0]?.message?.content??'';
 // Adding a provider = adding one entry here.
 export const PROVIDERS:Record<Provider,Adapter>={
- gemini:{name:'Google Gemini (free tier)',vision:true,models:['gemini-2.5-flash','gemini-2.5-flash-lite','gemini-2.5-pro','gemini-2.0-flash'],model:'gemini-2.5-flash',link:'https://aistudio.google.com/apikey',
+ gemini:{name:'Google Gemini (free tier)',vision:true,models:['gemini-3.8-flash','gemini-3.5-flash-lite','gemini-2.5-flash','gemini-2.5-pro'],model:'gemini-3.8-flash',link:'https://aistudio.google.com/apikey',
   tip:'Sign in with Google, click "Create API key", paste it here.',
   req:(k,m,s,u,img)=>({url:`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${k}`,headers:{},
-   body:{systemInstruction:{parts:[{text:s}]},generationConfig:{responseMimeType:'application/json',maxOutputTokens:8192,temperature:0.4,...(/2\.5-flash/.test(m)?{thinkingConfig:{thinkingBudget:0}}:{})},contents:[{role:'user',parts:[{text:u},...(img?[{inlineData:{mimeType:'image/png',data:img}}]:[])]}]}}),
+   body:{systemInstruction:{parts:[{text:s}]},generationConfig:{responseMimeType:'application/json',maxOutputTokens:16384,temperature:0.4,...(/2\.5-flash/.test(m)?{thinkingConfig:{thinkingBudget:0}}:{})},contents:[{role:'user',parts:[{text:u},...(img?[{inlineData:{mimeType:'image/png',data:img}}]:[])]}]}}),
   parse:d=>{const c=d.candidates?.[0];if(!c)throw new Error('Gemini returned no answer'+(d.promptFeedback?.blockReason?' (blocked: '+d.promptFeedback.blockReason+')':'')+'. Try rephrasing the topic.');if(c.finishReason==='SAFETY')throw new Error('Gemini blocked this response for safety reasons. Try a different topic or wording.');return c.content?.parts?.map((p:any)=>p.text||'').join('')??''},
   finish:d=>d.candidates?.[0]?.finishReason||''},
  groq:{name:'Groq (free tier)',vision:false,models:['openai/gpt-oss-120b','openai/gpt-oss-20b'],model:'openai/gpt-oss-120b',link:'https://console.groq.com/keys',
@@ -36,7 +36,7 @@ export async function chatMeta(c:Cfg,sys:string,usr:string,img?:string):Promise<
   catch{throw new Error('Network error — check your connection (or CORS/ad-blocker).');}
   if(res.status===429||res.status===503){if(i===3)throw new Error('Quota/rate limit exceeded. Wait a minute or switch provider.');await sleep(2000*2**i);continue;}
   if(!res.ok){const t=await res.text().catch(()=>'');
-   const hint=res.status===404?' The model name may be wrong; pick one from the Model list in Settings (try gemini-2.5-flash).':res.status===401||res.status===403?' Check that your API key is correct and enabled.':'';
+   const hint=res.status===404?' The model name may be wrong; pick one from the Model list in Settings (for Gemini try gemini-3.8-flash).':res.status===401||res.status===403?' Check that your API key is correct and enabled.':'';
    throw new Error(`Provider error ${res.status}.${hint} ${t.slice(0,300)}`);}
   const d=await res.json();return {text:a.parse(d),finish:a.finish?.(d)||''};
  }

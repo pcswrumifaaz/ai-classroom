@@ -16,7 +16,7 @@ export default function Home(){
  const [picked,setPicked]=useState<Record<number,number>>({});
  const [cmds,setCmds]=useState<BoardSpec[]>([]);const [sa,setSa]=useState<Record<number,string>>({});const [fb,setFb]=useState<Record<number,{score:number;feedback:string}>>({});
  useEffect(()=>{try{const c=localStorage.getItem('cfg'),l=localStorage.getItem('lesson');
-  if(c){const x=JSON.parse(c);if(x.provider==='gemini'&&x.model==='gemini-2.0-flash')x.model=PROVIDERS.gemini.model;setCfg(x);setTab('lesson')}if(l){const x=JSON.parse(l);setLesson(x);setLog(x.dialogue)}}catch{}},[]);
+  if(c){const x=JSON.parse(c);if(x.provider==='gemini'&&['gemini-2.0-flash','gemini-2.5-flash'].includes(x.model))x.model=PROVIDERS.gemini.model;setCfg(x);setTab('lesson')}if(l){const x=JSON.parse(l);setLesson(x);setLog(x.dialogue)}}catch{}},[]);
  const saveCfg=(c:Cfg)=>{setCfg(c);localStorage.setItem('cfg',JSON.stringify(c))};
  const speak=(t:Turn)=>{if(!('speechSynthesis' in window))return;const a=AGENTS[t.who],v=speechSynthesis.getVoices();
   const u=new SpeechSynthesisUtterance(t.text);if(v.length)u.voice=v[a.v%v.length];u.pitch=a.pitch;u.rate=a.rate;speechSynthesis.speak(u)};
