@@ -1,7 +1,7 @@
 'use client';
 import {useEffect,useState} from 'react';
 import {PROVIDERS,Provider,Cfg} from '@/lib/providers';
-import {Lesson,BoardSpec,AGENTS,generateLesson,orchestrate,gradeShort} from '@/lib/lesson';
+import {Lesson,BoardSpec,AGENTS,generateLesson,orchestrate,gradeShort,makeBoard} from '@/lib/lesson';
 import {extractPdf} from '@/lib/pdf';
 import Board from './Board';
 import {exportPptx,toMarkdown,download} from '@/lib/export';
@@ -24,8 +24,10 @@ export default function Home(){
  const gen=()=>run(async()=>{const l=await generateLesson(cfg,topic,doc);setLesson(l);setLog(l.dialogue);setSlide(0);setPicked({});
   localStorage.setItem('lesson',JSON.stringify(l));setTab('lesson')});
  const ask=()=>run(async()=>{if(!lesson||!q.trim())return;const me={who:'You',text:q};setLog(x=>[...x,me]);setQ('');
-  const t=await orchestrate(cfg,lesson,slide,me.text);setLog(x=>[...x,...t]);setCmds(c=>[...c,...t.flatMap((u:any)=>u.board&&Array.isArray(u.board.cmds)?[u.board]:[])]);t.forEach(speak)});
- const sketch=()=>run(async()=>{if(!lesson)return;const t=await orchestrate(cfg,lesson,slide,'Teacher, please draw a clear, accurate, labeled board for this slide on the blackboard, using plot, chain, ring, box3d or angle where they fit.');setLog(x=>[...x,...t]);setCmds(c=>[...c,...t.flatMap((u:any)=>u.board&&Array.isArray(u.board.cmds)?[u.board]:[])]);t.forEach(speak)});
+  const t=await orchestrate(cfg,lesson,slide,me.text);let bs:BoardSpec[]=t.flatMap((u:any)=>u.board?[u.board]:[]);
+  if(!bs.length&&/draw|show|graph|plot|diagram|structure|bond|visual|picture|sketch|board|illustrate|chart|shape|model/i.test(me.text))bs=[await makeBoard(cfg,lesson,slide,me.text)];
+  setLog(x=>[...x,...t]);setCmds(c=>[...c,...bs]);t.forEach(speak)});
+ const sketch=()=>run(async()=>{if(!lesson)return;const b=await makeBoard(cfg,lesson,slide,'the current slide: '+lesson.slides[slide].title+' — '+lesson.slides[slide].bullets.join('; '));setCmds(c=>[...c,b])});
  const upload=(f?:File)=>run(async()=>{if(!f)return;setDoc(/pdf$/i.test(f.name)?await extractPdf(f):await f.text())});
  const mic=()=>{const R=(window as any).SpeechRecognition||(window as any).webkitSpeechRecognition;if(!R)return setErr('Speech recognition is not supported in this browser.');
   const r=new R();r.onresult=(e:any)=>setQ(e.results[0][0].transcript);r.start()};
