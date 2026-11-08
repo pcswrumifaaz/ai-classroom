@@ -1,7 +1,7 @@
 'use client';
 import {useEffect,useState} from 'react';
 import {PROVIDERS,Provider,Cfg} from '@/lib/providers';
-import {Lesson,Cmd,AGENTS,generateLesson,orchestrate,gradeShort} from '@/lib/lesson';
+import {Lesson,BoardSpec,AGENTS,generateLesson,orchestrate,gradeShort} from '@/lib/lesson';
 import {extractPdf} from '@/lib/pdf';
 import Board from './Board';
 import {exportPptx,toMarkdown,download} from '@/lib/export';
@@ -14,7 +14,7 @@ export default function Home(){
  const [busy,setBusy]=useState(false);const [err,setErr]=useState('');
  const [log,setLog]=useState<Turn[]>([]);const [q,setQ]=useState('');
  const [picked,setPicked]=useState<Record<number,number>>({});
- const [cmds,setCmds]=useState<Cmd[]>([]);const [sa,setSa]=useState<Record<number,string>>({});const [fb,setFb]=useState<Record<number,{score:number;feedback:string}>>({});
+ const [cmds,setCmds]=useState<BoardSpec[]>([]);const [sa,setSa]=useState<Record<number,string>>({});const [fb,setFb]=useState<Record<number,{score:number;feedback:string}>>({});
  useEffect(()=>{try{const c=localStorage.getItem('cfg'),l=localStorage.getItem('lesson');
   if(c){setCfg(JSON.parse(c));setTab('lesson')}if(l){const x=JSON.parse(l);setLesson(x);setLog(x.dialogue)}}catch{}},[]);
  const saveCfg=(c:Cfg)=>{setCfg(c);localStorage.setItem('cfg',JSON.stringify(c))};
@@ -24,8 +24,8 @@ export default function Home(){
  const gen=()=>run(async()=>{const l=await generateLesson(cfg,topic,doc);setLesson(l);setLog(l.dialogue);setSlide(0);setPicked({});
   localStorage.setItem('lesson',JSON.stringify(l));setTab('lesson')});
  const ask=()=>run(async()=>{if(!lesson||!q.trim())return;const me={who:'You',text:q};setLog(x=>[...x,me]);setQ('');
-  const t=await orchestrate(cfg,lesson,slide,me.text);setLog(x=>[...x,...t]);setCmds(c=>[...c,...t.flatMap((u:any)=>Array.isArray(u.draw)?u.draw:[])]);t.forEach(speak)});
- const sketch=()=>run(async()=>{if(!lesson)return;const t=await orchestrate(cfg,lesson,slide,'Teacher, please sketch a simple labeled diagram for this slide on the whiteboard.');setLog(x=>[...x,...t]);setCmds(c=>[...c,...t.flatMap((u:any)=>Array.isArray(u.draw)?u.draw:[])]);t.forEach(speak)});
+  const t=await orchestrate(cfg,lesson,slide,me.text);setLog(x=>[...x,...t]);setCmds(c=>[...c,...t.flatMap((u:any)=>u.board&&Array.isArray(u.board.cmds)?[u.board]:[])]);t.forEach(speak)});
+ const sketch=()=>run(async()=>{if(!lesson)return;const t=await orchestrate(cfg,lesson,slide,'Teacher, please draw a clear, accurate, labeled board for this slide on the blackboard, using plot, chain, ring, box3d or angle where they fit.');setLog(x=>[...x,...t]);setCmds(c=>[...c,...t.flatMap((u:any)=>u.board&&Array.isArray(u.board.cmds)?[u.board]:[])]);t.forEach(speak)});
  const upload=(f?:File)=>run(async()=>{if(!f)return;setDoc(/pdf$/i.test(f.name)?await extractPdf(f):await f.text())});
  const mic=()=>{const R=(window as any).SpeechRecognition||(window as any).webkitSpeechRecognition;if(!R)return setErr('Speech recognition is not supported in this browser.');
   const r=new R();r.onresult=(e:any)=>setQ(e.results[0][0].transcript);r.start()};
@@ -62,7 +62,7 @@ export default function Home(){
     <span className="text-2xl">{AGENTS[t.who]?.emoji??'🧑'}</span><div><b>{t.who}</b><div>{t.text}</div></div></div>)}</div>
    <div className="flex gap-2"><input className="inp" placeholder="✋ Raise a hand — ask a question" value={q} onChange={e=>setQ(e.target.value)} onKeyDown={e=>e.key==='Enter'&&ask()}/>
     <button className="btn" onClick={mic}>🎤</button><button className="btn" disabled={busy} onClick={ask}>Ask</button></div>
-   <Board cmds={cmds} onClear={()=>setCmds([])}/><button className="btn" disabled={busy} onClick={sketch}>🖍 Teacher, draw this slide</button>
+   <Board boards={cmds} onClear={()=>setCmds([])}/><button className="btn" disabled={busy} onClick={sketch}>🖍 Teacher, draw this slide on the blackboard</button>
    <p className="text-xs opacity-70">One orchestrator call per question decides who answers. Click a message to hear it.</p></div>}
   {lesson&&tab==='quiz'&&<div className="space-y-3">{lesson.quiz.map((x,i)=><div key={i} className="card space-y-1"><b>{i+1}. {x.q}</b>
    {x.options.map((o,j)=><button key={j} disabled={picked[i]!==undefined} onClick={()=>setPicked({...picked,[i]:j})}
